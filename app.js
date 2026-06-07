@@ -16,7 +16,19 @@ const DEVICE_PROFILE = {
     '0000fee1-0000-1000-8000-00805f9b34fb',
     '0000fe01-0000-1000-8000-00805f9b34fb',
     '0000fe02-0000-1000-8000-00805f9b34fb',
-    '0000ff00-0000-1000-8000-00805f9b34fb'
+    '0000ff00-0000-1000-8000-00805f9b34fb',
+    // Microchip/ISSC Transparent UART, commonly used by DLG-CLOCK boards
+    '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+    // Extra common custom UART/EPD candidates
+    '0000fff0-0000-1000-8000-00805f9b34fb',
+    '0000fff1-0000-1000-8000-00805f9b34fb',
+    '0000ffd0-0000-1000-8000-00805f9b34fb',
+    // Microchip/ISSC Transparent UART, commonly used by DLG-CLOCK boards
+    '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+    // Extra common custom UART/EPD candidates
+    '0000fff0-0000-1000-8000-00805f9b34fb',
+    '0000fff1-0000-1000-8000-00805f9b34fb',
+    '0000ffd0-0000-1000-8000-00805f9b34fb'
   ],
   serviceUUIDs: [
     '0000ffe0-0000-1000-8000-00805f9b34fb',
@@ -33,16 +45,27 @@ const DEVICE_PROFILE = {
     '0000fee1-0000-1000-8000-00805f9b34fb',
     '0000fe02-0000-1000-8000-00805f9b34fb',
     '0000ff01-0000-1000-8000-00805f9b34fb',
-    '0000ff02-0000-1000-8000-00805f9b34fb'
+    '49535343-1e4d-4bd9-ba61-23c647249616',
+    '0000fff2-0000-1000-8000-00805f9b34fb',
+    '0000ffd2-0000-1000-8000-00805f9b34fb',
+    '0000ff02-0000-1000-8000-00805f9b34fb',
+    '49535343-8841-43f4-a8d4-ecbe34729bb3',
+    '49535343-aca3-481c-91ec-d85e28a60318',
+    '0000fff1-0000-1000-8000-00805f9b34fb',
+    '0000ffd1-0000-1000-8000-00805f9b34fb'
   ],
   notifyUUIDs:[
     '0000ffe1-0000-1000-8000-00805f9b34fb',
     '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
     '0000fe01-0000-1000-8000-00805f9b34fb',
-    '0000ff01-0000-1000-8000-00805f9b34fb'
+    '0000ff01-0000-1000-8000-00805f9b34fb',
+    '49535343-1e4d-4bd9-ba61-23c647249616',
+    '0000fff2-0000-1000-8000-00805f9b34fb',
+    '0000ffd2-0000-1000-8000-00805f9b34fb'
   ]
 };
 let device, server, writeChar, notifyChar, epdChar, rxtxChar;
+let allWriteChars = [];
 
 async function connect(){
   if(!navigator.bluetooth) throw new Error('This browser does not support Web Bluetooth. Use Chrome/Edge over HTTPS.');
@@ -58,7 +81,7 @@ async function connect(){
   server = await device.gatt.connect();
   log('GATT server found');
   await discoverWritableCharacteristics();
-  if(!writeChar) throw new Error('Writable BLE characteristic not found. Update UUIDs in app.js for your e-paper device.');
+  if(!writeChar && !allWriteChars.length) throw new Error('Writable BLE characteristic not found. UUID list updated; please send the new log if this still appears.');
   $('#btStatus').textContent = `Connected: ${device.name||'E-paper device'}`;
   $('#btStatus').style.background='#16a34a';
   log('Bluetooth connected');
@@ -66,6 +89,7 @@ async function connect(){
 
 async function discoverWritableCharacteristics(){
   writeChar = notifyChar = epdChar = rxtxChar = null;
+  allWriteChars = [];
   for(const su of DEVICE_PROFILE.serviceUUIDs){
     try{
       const service = await server.getPrimaryService(su);
@@ -75,11 +99,12 @@ async function discoverWritableCharacteristics(){
         const p = ch.properties;
         const writable = p.write || p.writeWithoutResponse;
         if(writable){
+          allWriteChars.push(ch);
           if(!writeChar) writeChar = ch;
           // The original web uses epdCharacteristic for time/update commands.
           // Prefer likely EPD service over UART service; fallback to first writable.
-          if(service.uuid.includes('fe') || service.uuid.includes('ff')) epdChar = ch;
-          if(service.uuid.includes('ffe0') || service.uuid.includes('6e400001')) rxtxChar = ch;
+          if(service.uuid.includes('fe') || service.uuid.includes('ff') || service.uuid.includes('49535343')) epdChar = ch;
+          if(service.uuid.includes('ffe0') || service.uuid.includes('6e400001') || service.uuid.includes('49535343')) rxtxChar = ch;
           log(`Writable characteristic: ${shortUuid(ch.uuid)}`);
         }
         if(p.notify || p.indicate){
@@ -94,6 +119,7 @@ async function discoverWritableCharacteristics(){
     }catch{}
   }
   if(epdChar) writeChar = epdChar;
+  if(allWriteChars.length) log(`Total writable characteristics found: ${allWriteChars.length}`);
 }
 
 function shortUuid(uuid){ return String(uuid).replace('-0000-1000-8000-00805f9b34fb',''); }
@@ -103,10 +129,17 @@ async function writeToChar(characteristic, data){
 }
 async function sendBytes(bytes, prefer='epd'){
   const data = bytes instanceof Uint8Array ? bytes : new TextEncoder().encode(String(bytes));
-  const target = prefer==='rxtx' ? (rxtxChar || writeChar) : (epdChar || writeChar);
-  if(!target){ log('Demo send: '+hex(data)); return; }
+  let targets = [];
+  if(prefer === 'all') targets = allWriteChars.length ? allWriteChars : [epdChar || rxtxChar || writeChar].filter(Boolean);
+  else targets = [prefer==='rxtx' ? (rxtxChar || writeChar) : (epdChar || writeChar)].filter(Boolean);
+  if(!targets.length){ log('Demo send: '+hex(data)); return; }
   const chunk = 180;
-  for(let i=0;i<data.length;i+=chunk){ await writeToChar(target, data.slice(i,i+chunk)); await new Promise(r=>setTimeout(r,12)); }
+  for(const target of [...new Set(targets)]){
+    for(let i=0;i<data.length;i+=chunk){
+      await writeToChar(target, data.slice(i,i+chunk));
+      await new Promise(r=>setTimeout(r,20));
+    }
+  }
   log('TX '+data.length+' bytes: '+hex(data));
 }
 const hex = a => [...a].map(x=>x.toString(16).padStart(2,'0')).join(' ');
@@ -140,7 +173,7 @@ function setTimeFromInput(){
   $('#timeInput').value = value;
   const date = new Date(value);
   const packet = epaperTimePacket(date);
-  sendBytes(packet, 'epd').then(()=>log(`Time set to: ${date.toLocaleTimeString()} : ${hex(packet).replaceAll(' ','')}`)).catch(e=>log('Set Time error: '+e.message));
+  sendBytes(packet, 'all').then(()=>log(`Time set to: ${date.toLocaleTimeString()} : ${hex(packet).replaceAll(' ','')}`)).catch(e=>log('Set Time error: '+e.message));
 }
 $('#timeInput').value = localDateTimeValue();
 $('#timeInput').onchange=setTimeFromInput;
