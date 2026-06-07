@@ -44,8 +44,20 @@ $('#scanBtn').onclick = () => connect().catch(e=>log('BLE error: '+e.message));
 $('#reconnectBtn').onclick = async()=>{ if(device?.gatt) {server=await device.gatt.connect(); log('Reconnected');} else connect().catch(e=>log(e.message)); };
 $('#clearLogBtn').onclick=()=>logEl.textContent='';
 $$('[data-cmd]').forEach(b=>b.onclick=()=>sendBytes(cmdPacket(b.dataset.cmd)));
-$('#timeInput').value = new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
-$('#timeInput').onchange=()=>sendBytes(cmdPacket('SET_TIME:'+$('#timeInput').value));
+function localDateTimeValue(date = new Date()){
+  return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+}
+function setTimeFromInput(){
+  // Send current selected time immediately when the user clicks Set Time or changes the picker.
+  // The original device behavior applies the time right away after picker selection.
+  const value = $('#timeInput').value || localDateTimeValue();
+  $('#timeInput').value = value;
+  sendBytes(cmdPacket('SET_TIME:'+value));
+}
+$('#timeInput').value = localDateTimeValue();
+$('#timeInput').onchange=setTimeFromInput;
+$('#timeInput').onblur=setTimeFromInput;
+$('#setTimeBtn').onclick=setTimeFromInput;
 $('#enableSleep').onclick=()=>sendBytes(cmdPacket(`SLEEP_ON:${$('#sleepStart').value},${$('#sleepEnd').value}`));
 $('#disableSleep').onclick=()=>sendBytes(cmdPacket('SLEEP_OFF'));
 $('#setNumberBtn').onclick=()=>sendBytes(cmdPacket('NUMBER:'+$('#numberInput').value));
