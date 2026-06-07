@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>E-Paper Tag Controller</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div><h1>E-Paper Tag Controller</h1><p>Bluetooth settings · Countdown · Image transfer · Template designer</p></div>
+    <div class="status" id="btStatus">Disconnected</div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="settings">Settings</button>
+    <button class="tab" data-tab="countdown">Countdown Module</button>
+    <button class="tab" data-tab="transfer">Image Transfer</button>
+    <button class="tab" data-tab="designer">Template Designer</button>
+  </nav>
+
+  <main>
+    <section id="settings" class="panel active">
+      <h2>E-Paper Bluetooth Controller</h2>
+      <p class="hint">Connect device first before sending commands. Web Bluetooth requires HTTPS or localhost.</p>
+      <div class="grid controls">
+        <button id="scanBtn">Scan Devices</button><button id="reconnectBtn">Reconnect</button><button id="clearLogBtn">Clear Logs</button>
+      </div>
+      <label>Set Time <input id="timeInput" type="datetime-local"></label>
+      <div class="button-grid">
+        <button data-cmd="CLOCK">Switch to Clock Mode</button><button data-cmd="CALENDAR">Switch to Calendar Mode</button>
+        <button data-cmd="CLOCK_COLOR">Toggle Clock Color</button><button data-cmd="IMAGE_MODE">Set Image Mode</button>
+        <button data-cmd="INVERT">Toggle B&W Color Inversion</button><button data-cmd="ROTATE_180">Rotate Screen 180 deg</button>
+        <button data-cmd="PARTIAL_CAL">Set Partial Refresh Calibration</button><button data-cmd="REFRESH">Refresh</button>
+        <button data-cmd="AA">Send AA</button><button data-cmd="AB">Send AB</button>
+      </div>
+      <div class="card rowwrap">
+        <label>Start Hour <input id="sleepStart" type="number" min="0" max="23" value="23"></label>
+        <label>End Hour <input id="sleepEnd" type="number" min="0" max="23" value="7"></label>
+        <button id="enableSleep">Enable Sleep</button><button id="disableSleep">Disable Sleep</button><button data-cmd="POWER_REPAIR">Power Save + Repair</button>
+      </div>
+      <div class="card rowwrap"><label>2.13 low-res number <input id="numberInput" type="number" value="1"></label><button id="setNumberBtn">Set Number Display</button><button data-cmd="ACTIVATE">Activate</button></div>
+    </section>
+
+    <section id="countdown" class="panel">
+      <h2>Countdown Date Picker</h2>
+      <label>Select date <input id="countDate" type="date"></label>
+      <div class="rowwrap"><label>Enter text (max 8 chars) <input id="countText" maxlength="8" value="SALE"></label><button id="applyCountdown">Apply</button></div>
+      <div class="rowwrap"><label>Font <select id="countFont"><option>Arial</option><option>SimSun</option><option>Microsoft YaHei</option><option>SimHei</option><option>KaiTi</option></select></label><label>Font Size <input id="countSize" type="range" min="50" max="150" value="100"><span id="countSizeText">100%</span></label><label><input id="countInvert" type="checkbox"> Invert Colors</label><label><input id="countGrid" type="checkbox"> Show Grid</label></div>
+      <canvas id="countCanvas" width="400" height="300"></canvas>
+      <div class="rowwrap"><button id="startCountdown">Start Countdown</button><button id="stopCountdown">Stop Countdown</button><button id="sendCountdown">Upload Countdown</button></div>
+    </section>
+
+    <section id="transfer" class="panel">
+      <h2>Upload Image to Screen</h2>
+      <div class="rowwrap"><label>Screen Size <select id="screenSize"><option value="400x300">4.2 Transfer</option><option value="640x384">7.5 Transfer</option><option value="296x128">2.9 Transfer</option><option value="212x104">2.13 212x104</option><option value="250x144">2.13 250x144</option></select></label><label>Dithering <select id="dither"><option value="none">BWR No Dithering</option><option value="floyd">BWR Floyd-Steinberg</option><option value="atkinson">BWR Atkinson</option><option value="bayer">BWR Bayer</option></select></label><label>Threshold <input id="threshold" type="range" min="0" max="255" value="128"></label></div>
+      <div class="rowwrap"><input id="imageInput" type="file" accept="image/*"><label>Rotation <input id="rotation" type="number" value="0" step="90"></label><label>Scale <input id="scale" type="range" min="10" max="250" value="100"></label></div>
+      <div class="rowwrap"><button id="reloadImg">Reload</button><button id="stretchImg">Stretch to Screen</button><button id="fitImg">Fit to Screen</button><button id="rotateCW">Rotate CW 90</button><button id="rotateCCW">Rotate CCW 90</button><button id="resetImg">Reset</button></div>
+      <div class="card"><h3>Image Adjustment</h3><label>Brightness <input id="brightness" type="range" min="0" max="200" value="100"></label><label>Contrast <input id="contrast" type="range" min="0" max="200" value="100"></label><label>Saturation <input id="saturation" type="range" min="0" max="200" value="100"></label><label>Diffusion Strength <input id="diffusion" type="range" min="0" max="100" value="50"></label></div>
+      <canvas id="imgCanvas" width="400" height="300"></canvas>
+      <div class="rowwrap"><button id="applyImg">Apply Image Adjustment</button><button id="uploadImg">Upload to Screen Now</button><button id="downloadImg">Save Processed Image</button></div>
+    </section>
+
+    <section id="designer" class="panel">
+      <h2>Template Designer</h2>
+      <div class="designer-layout">
+        <aside class="toolbox">
+          <h3>Add Element</h3>
+          <select id="elementType"><option>Text</option><option>Rectangle</option><option>Circle</option><option>Triangle</option><option>Line</option><option>Star</option><option>Image/Icon</option></select>
+          <input id="customText" value="Custom Text"><button id="addElement">Add Element</button>
+          <h3>Style</h3>
+          <input id="fillColor" type="color" value="#000000"><button id="applyColor">Apply Color</button>
+          <select id="fontFamily"><option>Microsoft YaHei</option><option>Arial</option><option>SimSun</option><option>SimHei</option><option>KaiTi</option></select>
+          <select id="fontSize"><option>16</option><option>24</option><option>32</option><option>48</option><option>60</option><option>88</option><option>120</option><option>200</option></select>
+          <div class="rowwrap"><button id="boldBtn">Bold</button><button id="italicBtn">Italic</button><button id="underlineBtn">Underline</button></div>
+          <button id="updateText">Update Text</button>
+          <h3>Transform</h3>
+          <div class="rowwrap"><input id="elW" type="number" placeholder="W"><input id="elH" type="number" placeholder="H"><button id="applySize">Apply Size</button></div>
+          <div class="rowwrap"><input id="elRot" type="number" value="0"><button id="applyRot">Apply Rot</button></div>
+          <div class="movegrid"><button id="moveUp">↑</button><button id="moveLeft">←</button><button id="moveDown">↓</button><button id="moveRight">→</button></div>
+          <div class="rowwrap"><button id="copyEl">Copy</button><button id="deleteEl">Delete</button><button id="frontEl">To Front</button><button id="backEl">To Back</button></div>
+          <h3>QR / Template</h3><input id="qrText" value="https://xly95.github.io/"><button id="makeQr">Generate QR Code</button>
+          <select id="template"><option>Solid</option><option>NoteMemo</option><option>Namecard</option><option>ClassSchedule</option><option>WIFI</option><option>Random</option></select><button id="applyTemplate">Apply Template</button>
+          <input id="bgInput" type="file" accept="image/*"><button id="clearCanvas">Clear All</button><button id="saveCanvas">Save Canvas as Image</button><button id="sendDesigner">Apply Template & Go to Transfer</button>
+        </aside>
+        <canvas id="designCanvas" width="400" height="300"></canvas>
+      </div>
+    </section>
+    <section class="logbox"><h3>Log</h3><pre id="log"></pre></section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
