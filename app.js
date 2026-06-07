@@ -6,61 +6,154 @@ const log = m => { logEl.textContent += `[${new Date().toLocaleTimeString()}] ${
 // Tabs
 $$('.tab').forEach(btn => btn.onclick = () => { $$('.tab,.panel').forEach(x=>x.classList.remove('active')); btn.classList.add('active'); $('#'+btn.dataset.tab).classList.add('active'); });
 
-// Bluetooth layer - generic UART/Nordic compatible. Adjust UUIDs in DEVICE_PROFILE when your hardware spec is known.
+// Bluetooth layer - compatible with Alibaba Group 20190605 / DLG-CLOCK e-paper tags.
+// The board uses a BLE writable characteristic and binary command packets.
 const DEVICE_PROFILE = {
-  optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb','6e400001-b5a3-f393-e0a9-e50e24dcca9e'],
-  serviceUUIDs: ['0000ffe0-0000-1000-8000-00805f9b34fb','6e400001-b5a3-f393-e0a9-e50e24dcca9e'],
-  writeUUIDs: ['0000ffe1-0000-1000-8000-00805f9b34fb','6e400002-b5a3-f393-e0a9-e50e24dcca9e'],
-  notifyUUIDs:['0000ffe1-0000-1000-8000-00805f9b34fb','6e400003-b5a3-f393-e0a9-e50e24dcca9e']
+  optionalServices: [
+    '0000ffe0-0000-1000-8000-00805f9b34fb', // common UART clone
+    '6e400001-b5a3-f393-e0a9-e50e24dcca9e', // Nordic UART
+    '0000fee0-0000-1000-8000-00805f9b34fb',
+    '0000fee1-0000-1000-8000-00805f9b34fb',
+    '0000fe01-0000-1000-8000-00805f9b34fb',
+    '0000fe02-0000-1000-8000-00805f9b34fb',
+    '0000ff00-0000-1000-8000-00805f9b34fb'
+  ],
+  serviceUUIDs: [
+    '0000ffe0-0000-1000-8000-00805f9b34fb',
+    '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+    '0000fee0-0000-1000-8000-00805f9b34fb',
+    '0000fee1-0000-1000-8000-00805f9b34fb',
+    '0000fe01-0000-1000-8000-00805f9b34fb',
+    '0000fe02-0000-1000-8000-00805f9b34fb',
+    '0000ff00-0000-1000-8000-00805f9b34fb'
+  ],
+  writeUUIDs: [
+    '0000ffe1-0000-1000-8000-00805f9b34fb',
+    '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+    '0000fee1-0000-1000-8000-00805f9b34fb',
+    '0000fe02-0000-1000-8000-00805f9b34fb',
+    '0000ff01-0000-1000-8000-00805f9b34fb',
+    '0000ff02-0000-1000-8000-00805f9b34fb'
+  ],
+  notifyUUIDs:[
+    '0000ffe1-0000-1000-8000-00805f9b34fb',
+    '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
+    '0000fe01-0000-1000-8000-00805f9b34fb',
+    '0000ff01-0000-1000-8000-00805f9b34fb'
+  ]
 };
-let device, server, writeChar, notifyChar;
+let device, server, writeChar, notifyChar, epdChar, rxtxChar;
+
 async function connect(){
   if(!navigator.bluetooth) throw new Error('This browser does not support Web Bluetooth. Use Chrome/Edge over HTTPS.');
-  device = await navigator.bluetooth.requestDevice({acceptAllDevices:true, optionalServices:DEVICE_PROFILE.optionalServices});
-  device.addEventListener('gattserverdisconnected',()=>{$('#btStatus').textContent='Disconnected';$('#btStatus').style.background='';log('Device disconnected');});
+  device = await navigator.bluetooth.requestDevice({
+    acceptAllDevices:true,
+    optionalServices:DEVICE_PROFILE.optionalServices
+  });
+  device.addEventListener('gattserverdisconnected',()=>{
+    $('#btStatus').textContent='Disconnected';
+    $('#btStatus').style.background='';
+    log('Device disconnected');
+  });
   server = await device.gatt.connect();
+  log('GATT server found');
+  await discoverWritableCharacteristics();
+  if(!writeChar) throw new Error('Writable BLE characteristic not found. Update UUIDs in app.js for your e-paper device.');
+  $('#btStatus').textContent = `Connected: ${device.name||'E-paper device'}`;
+  $('#btStatus').style.background='#16a34a';
+  log('Bluetooth connected');
+}
+
+async function discoverWritableCharacteristics(){
+  writeChar = notifyChar = epdChar = rxtxChar = null;
   for(const su of DEVICE_PROFILE.serviceUUIDs){
     try{
       const service = await server.getPrimaryService(su);
-      for(const wu of DEVICE_PROFILE.writeUUIDs){ try{ writeChar = await service.getCharacteristic(wu); break; }catch{} }
-      for(const nu of DEVICE_PROFILE.notifyUUIDs){ try{ notifyChar = await service.getCharacteristic(nu); break; }catch{} }
-      if(writeChar) break;
+      log(`Service found: ${shortUuid(service.uuid)}`);
+      const chars = await service.getCharacteristics();
+      for(const ch of chars){
+        const p = ch.properties;
+        const writable = p.write || p.writeWithoutResponse;
+        if(writable){
+          if(!writeChar) writeChar = ch;
+          // The original web uses epdCharacteristic for time/update commands.
+          // Prefer likely EPD service over UART service; fallback to first writable.
+          if(service.uuid.includes('fe') || service.uuid.includes('ff')) epdChar = ch;
+          if(service.uuid.includes('ffe0') || service.uuid.includes('6e400001')) rxtxChar = ch;
+          log(`Writable characteristic: ${shortUuid(ch.uuid)}`);
+        }
+        if(p.notify || p.indicate){
+          try{
+            await ch.startNotifications();
+            ch.addEventListener('characteristicvaluechanged', e=>log('RX '+hex(new Uint8Array(e.target.value.buffer))));
+            notifyChar = ch;
+            log(`Notify characteristic: ${shortUuid(ch.uuid)}`);
+          }catch{}
+        }
+      }
     }catch{}
   }
-  if(!writeChar) throw new Error('Writable BLE characteristic not found. Update UUIDs in app.js for your e-paper device.');
-  if(notifyChar){ await notifyChar.startNotifications(); notifyChar.addEventListener('characteristicvaluechanged', e=>log('RX '+hex(new Uint8Array(e.target.value.buffer)))); }
-  $('#btStatus').textContent = `Connected: ${device.name||'E-paper device'}`; $('#btStatus').style.background='#16a34a'; log('Bluetooth connected');
+  if(epdChar) writeChar = epdChar;
 }
-async function sendBytes(bytes){
+
+function shortUuid(uuid){ return String(uuid).replace('-0000-1000-8000-00805f9b34fb',''); }
+async function writeToChar(characteristic, data){
+  if(characteristic.properties.writeWithoutResponse) return characteristic.writeValueWithoutResponse(data);
+  return characteristic.writeValue(data);
+}
+async function sendBytes(bytes, prefer='epd'){
   const data = bytes instanceof Uint8Array ? bytes : new TextEncoder().encode(String(bytes));
-  if(!writeChar){ log('Demo send: '+hex(data)); return; }
+  const target = prefer==='rxtx' ? (rxtxChar || writeChar) : (epdChar || writeChar);
+  if(!target){ log('Demo send: '+hex(data)); return; }
   const chunk = 180;
-  for(let i=0;i<data.length;i+=chunk){ await writeChar.writeValueWithoutResponse(data.slice(i,i+chunk)); await new Promise(r=>setTimeout(r,8)); }
-  log('TX '+data.length+' bytes');
+  for(let i=0;i<data.length;i+=chunk){ await writeToChar(target, data.slice(i,i+chunk)); await new Promise(r=>setTimeout(r,12)); }
+  log('TX '+data.length+' bytes: '+hex(data));
 }
 const hex = a => [...a].map(x=>x.toString(16).padStart(2,'0')).join(' ');
-const cmdPacket = cmd => new TextEncoder().encode(`CMD:${cmd}\n`);
+function hexToBytes(str){
+  const clean = String(str).replace(/[^0-9a-fA-F]/g,'');
+  if(clean.length % 2) throw new Error('HEX command must have an even number of characters');
+  return new Uint8Array(clean.match(/.{1,2}/g).map(x=>parseInt(x,16)));
+}
+const cmdPacket = cmd => hexToBytes(cmd); // Original control buttons send raw HEX like e102/e3/e5/AA.
 $('#scanBtn').onclick = () => connect().catch(e=>log('BLE error: '+e.message));
-$('#reconnectBtn').onclick = async()=>{ if(device?.gatt) {server=await device.gatt.connect(); log('Reconnected');} else connect().catch(e=>log(e.message)); };
+$('#reconnectBtn').onclick = async()=>{ if(device?.gatt) {server=await device.gatt.connect(); await discoverWritableCharacteristics(); log('Reconnected');} else connect().catch(e=>log(e.message)); };
 $('#clearLogBtn').onclick=()=>logEl.textContent='';
-$$('[data-cmd]').forEach(b=>b.onclick=()=>sendBytes(cmdPacket(b.dataset.cmd)));
+$$('[data-cmd]').forEach(b=>b.onclick=()=>sendBytes(cmdPacket(b.dataset.cmd), b.dataset.cmd?.toLowerCase().startsWith('e') ? 'rxtx':'epd').catch(e=>log('TX error: '+e.message)));
 function localDateTimeValue(date = new Date()){
   return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
 }
+function epaperTimePacket(date){
+  // DLG-CLOCK / Alibaba 20190605 command: DD + Unix timestamp (4 bytes, big-endian).
+  // Example from original page log: DD 6A 26 60 6A.
+  const seconds = Math.floor(date.getTime()/1000);
+  return new Uint8Array([
+    0xdd,
+    (seconds >>> 24) & 0xff,
+    (seconds >>> 16) & 0xff,
+    (seconds >>> 8) & 0xff,
+    seconds & 0xff
+  ]);
+}
 function setTimeFromInput(){
-  // Send current selected time immediately when the user clicks Set Time or changes the picker.
-  // The original device behavior applies the time right away after picker selection.
   const value = $('#timeInput').value || localDateTimeValue();
   $('#timeInput').value = value;
-  sendBytes(cmdPacket('SET_TIME:'+value));
+  const date = new Date(value);
+  const packet = epaperTimePacket(date);
+  sendBytes(packet, 'epd').then(()=>log(`Time set to: ${date.toLocaleTimeString()} : ${hex(packet).replaceAll(' ','')}`)).catch(e=>log('Set Time error: '+e.message));
 }
 $('#timeInput').value = localDateTimeValue();
 $('#timeInput').onchange=setTimeFromInput;
 $('#timeInput').onblur=setTimeFromInput;
 $('#setTimeBtn').onclick=setTimeFromInput;
-$('#enableSleep').onclick=()=>sendBytes(cmdPacket(`SLEEP_ON:${$('#sleepStart').value},${$('#sleepEnd').value}`));
-$('#disableSleep').onclick=()=>sendBytes(cmdPacket('SLEEP_OFF'));
-$('#setNumberBtn').onclick=()=>sendBytes(cmdPacket('NUMBER:'+$('#numberInput').value));
+$('#enableSleep').onclick=()=>sendBytes(hexToBytes(`FB01${(+$('#sleepStart').value||0).toString(16).padStart(2,'0')}${(+$('#sleepEnd').value||0).toString(16).padStart(2,'0')}`),'rxtx');
+$('#disableSleep').onclick=()=>sendBytes(hexToBytes('FB00'),'rxtx');
+$('#setNumberBtn').onclick=()=>{
+  const n = String($('#numberInput').value || '').trim();
+  const bytes = new TextEncoder().encode(n);
+  const packet = new Uint8Array(1+bytes.length); packet[0]=0xdc; packet.set(bytes,1);
+  sendBytes(packet,'epd');
+};
 
 // Countdown canvas
 const cc=$('#countCanvas'), cctx=cc.getContext('2d'); let timer;
